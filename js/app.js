@@ -4,6 +4,16 @@
  * Suporte completo aos 6 Eixos regulamentares (Ensino, Pesquisa, Extensão, Arte/Cultura, Inovação e Gestão Institucional)
  */
 
+// ==========================================
+// Configuração do Supabase
+// ==========================================
+const supabaseUrl = 'https://qidnxbbaryjcexdqiitu.supabase.co';
+const supabaseKey = 'sb_publishable_g3p8l9ujgH0g9Gac2KTu2A_hisZgvas';
+let supabaseClient = null;
+if (window.supabase) {
+  supabaseClient = window.supabase.createClient(supabaseUrl, supabaseKey);
+}
+
 const app = {
   state: {
     docente: {
@@ -11,7 +21,7 @@ const app = {
       siape: "",
       regime: "40_DE",
       unidade: "Instituto de Artes e Design (IAD)",
-      periodo: "2025",
+      periodo: "2025/1",
       tipoDoc: "PIT"
     },
     // Guarda as atividades por item: { "1_I": [ { id, descricao, horas, obs } ], ... }
@@ -56,6 +66,75 @@ const app = {
       localStorage.setItem("pit_rit_dados_v5", JSON.stringify(this.state));
     } catch (e) {
       console.warn("Não foi possível salvar no localStorage", e);
+    }
+  },
+
+  /**
+   * Salvamento manual explícito acionado pelo usuário
+   */
+  salvarManual() {
+    // Força atualização dos dados da identificação caso não tenham clicado em continuar
+    const nome = document.getElementById("docenteNome")?.value.trim();
+    if (nome) {
+      this.state.docente.nome = nome;
+      this.state.docente.siape = document.getElementById("docenteSiape")?.value.trim() || "";
+      this.state.docente.regime = document.getElementById("docenteRegime")?.value || "40_DE";
+      this.state.docente.unidade = document.getElementById("docenteUnidade")?.value.trim() || "";
+      this.state.docente.periodo = document.getElementById("docentePeriodo")?.value.trim() || "";
+      this.state.docente.tipoDoc = document.getElementById("docenteTipoDoc")?.value || "PIT";
+    }
+
+    this.salvarNoLocalStorage();
+    alert("Dados salvos localmente com sucesso! Você pode fechar o sistema e continuar mais tarde.");
+  },
+
+  /**
+   * Envia os dados para a tabela pit_rit_documentos no Supabase
+   */
+  async salvarNoSupabase() {
+    if (!supabaseClient) {
+      alert("Erro de conexão com o banco de dados. Tente novamente.");
+      return;
+    }
+
+    // Força atualização dos dados da identificação caso o usuário não tenha clicado em continuar
+    const nome = document.getElementById("docenteNome")?.value.trim() || this.state.docente.nome;
+    const siape = document.getElementById("docenteSiape")?.value.trim() || this.state.docente.siape;
+    const regime = document.getElementById("docenteRegime")?.value || this.state.docente.regime;
+    const unidade = document.getElementById("docenteUnidade")?.value.trim() || this.state.docente.unidade;
+    const periodo = document.getElementById("docentePeriodo")?.value.trim() || this.state.docente.periodo;
+    const tipoDoc = document.getElementById("docenteTipoDoc")?.value || this.state.docente.tipoDoc;
+
+    if (!nome || !siape) {
+      alert("É necessário preencher pelo menos Nome e SIAPE para enviar os dados.");
+      return;
+    }
+
+    try {
+      // Usa upsert com onConflict para evitar requisições PATCH (que causam erro de CORS
+      // quando o arquivo é aberto localmente como file://). O upsert usa POST internamente,
+      // que é permitido pelo CORS sem preflight.
+      // Requer que a tabela tenha uma constraint UNIQUE em (siape, periodo, tipo_doc).
+      const payload = {
+        siape: siape,
+        nome: nome,
+        regime: regime,
+        unidade: unidade,
+        periodo: periodo,
+        tipo_doc: tipoDoc,
+        atividades: this.state.atividades
+      };
+
+      const { error } = await supabaseClient
+        .from('pit_rit_documentos')
+        .upsert(payload, { onConflict: 'siape,periodo,tipo_doc' });
+
+      if (error) throw error;
+
+      alert("Dados enviados para o Supabase com sucesso!");
+    } catch (err) {
+      console.error("Erro ao salvar no Supabase:", err);
+      alert("Houve um erro ao enviar para a nuvem: " + (err.message || JSON.stringify(err)) + "\n\nPor favor, verifique o Console do navegador (F12).");
     }
   },
 
@@ -796,7 +875,7 @@ const app = {
     if (repNome) repNome.textContent = doc.nome || "Não informado";
     if (repSiape) repSiape.textContent = doc.siape || "Não informado";
     if (repRegime) repRegime.textContent = regimeFormatado;
-    if (repPeriodo) repPeriodo.textContent = `Ano de Vigência: ${doc.periodo || "2025"} — ${doc.unidade || "IAD"}`;
+    if (repPeriodo) repPeriodo.textContent = `Semestre de Vigência: ${doc.periodo || "2025/1"} — ${doc.unidade || "IAD"}`;
     if (repTipoDoc) repTipoDoc.textContent = doc.tipoDoc || "PIT";
 
     const tbody = document.getElementById("reportCompiledTbody");
@@ -821,7 +900,7 @@ const app = {
       const trEixoHeader = document.createElement("tr");
       trEixoHeader.className = "report-axis-header-row";
       trEixoHeader.innerHTML = `
-        <td colspan="4">${(eixo.icone || "")} ${eixo.titulo.toUpperCase()} (${eixo.subtitulo})</td>
+        <td colspan="5">${(eixo.icone || "")} ${eixo.titulo.toUpperCase()} (${eixo.subtitulo})</td>
       `;
       tbody.appendChild(trEixoHeader);
 
@@ -831,7 +910,7 @@ const app = {
           ultimoSubgrupo = item.subgrupo;
           const trSubgroup = document.createElement("tr");
           trSubgroup.className = "report-subgroup-row";
-          trSubgroup.innerHTML = `<td colspan="4">📂 ${item.subgrupo}</td>`;
+          trSubgroup.innerHTML = `<td colspan="5">📂 ${item.subgrupo}</td>`;
           tbody.appendChild(trSubgroup);
         }
 
@@ -852,7 +931,9 @@ const app = {
           tr.innerHTML = `
             <td style="text-align: center; font-weight: bold; color: #64748b;">${item.numeroRomano}</td>
             <td>
-              <div style="font-weight: 600; color: #475569;">${item.descricao}</div>
+              <div style="font-size: 0.85rem; font-weight: 600; color: #475569;">${item.descricao}</div>
+            </td>
+            <td>
               <div style="font-size: 0.8rem; color: #94a3b8; font-style: italic;">— Sem atividades lançadas —</div>
             </td>
             <td style="font-size: 0.8rem; color: #64748b;">${item.observacao}</td>
@@ -867,7 +948,9 @@ const app = {
             tr.innerHTML = `
               <td style="text-align: center; font-weight: bold; color: #0b3b60;">${idx === 0 ? item.numeroRomano : ""}</td>
               <td>
-                ${idx === 0 ? `<div style="font-size: 0.8rem; color: #64748b; font-weight: 600; margin-bottom: 2px;">${item.descricao}</div>` : ""}
+                ${idx === 0 ? `<div style="font-size: 0.85rem; color: #475569; font-weight: 600;">${item.descricao}</div>` : ""}
+              </td>
+              <td>
                 <div style="font-weight: 700; color: #0f172a; padding-left: 8px; border-left: 3px solid #0284c7;">
                   ${this.escaparHtml(act.descricao)}
                   ${act.obs ? `<span style="font-weight: normal; font-size: 0.8rem; color: #64748b;"> (${this.escaparHtml(act.obs)})</span>` : ""}
@@ -885,7 +968,7 @@ const app = {
             trSub.style.backgroundColor = "#f8fafc";
             trSub.innerHTML = `
               <td></td>
-              <td colspan="2" style="text-align: right; font-size: 0.8rem; font-weight: 600; color: #64748b;">
+              <td colspan="3" style="text-align: right; font-size: 0.8rem; font-weight: 600; color: #64748b;">
                 Subtotal do Item ${item.numeroRomano}:
               </td>
               <td style="text-align: right; font-weight: 800; color: #0b3b60; border-top: 1px dashed #cbd5e1;">
@@ -904,7 +987,7 @@ const app = {
       const limiteSem = cargaRegime * (eixo.limitePercentualRegime || 1);
 
       trTotalEixo.innerHTML = `
-        <td colspan="3" style="text-align: right; font-weight: 800; color: #0b3b60;">
+        <td colspan="4" style="text-align: right; font-weight: 800; color: #0b3b60;">
           SUBTOTAL DO ${eixo.titulo.toUpperCase()} (Teto de ${pctTexto}% = ${limiteSem.toFixed(1)} h/sem):
         </td>
         <td style="text-align: right; font-weight: 800; font-size: 1rem; color: #0b3b60;">
@@ -1282,8 +1365,9 @@ const app = {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     const nomeLimpo = (doc.nome || "Docente").replace(/[^a-zA-Z0-9]/g, "_");
+    const periodoLimpo = (doc.periodo || "2025_1").replace(/\//g, "-");
     link.setAttribute("href", url);
-    link.setAttribute("download", `PIT_RIT_${nomeLimpo}_${doc.periodo || "2025"}.xlsx`);
+    link.setAttribute("download", `PIT_RIT_${nomeLimpo}_${periodoLimpo}.xlsx`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);

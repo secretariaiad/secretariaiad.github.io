@@ -1022,9 +1022,14 @@ body {
    Estilos de Impressão (@media print)
    ========================================================================== */
 @media print {
+  @page {
+    margin: 0; /* Remove cabeçalho e rodapé padrão do navegador (data, url, etc) */
+  }
+
   body {
     background: #ffffff;
     color: #000000;
+    padding: 1.5cm 1.5cm; /* Adiciona a margem de segurança na página impressa */
   }
   
   .header-institutional,

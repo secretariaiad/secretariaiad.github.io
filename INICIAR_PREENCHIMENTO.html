@@ -29,8 +29,14 @@
             <span>SIAPE: <strong id="headerDocenteSiape">-</strong></span>
           </div>
         </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.salvarNoSupabase()" style="font-size: 0.8rem; background: rgba(33, 150, 243, 0.2); color: #ffffff; border: 1px solid rgba(33, 150, 243, 0.5);" title="Enviar definitivamente os dados para o Supabase">
+          ☁️ Enviar Nuvem
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.salvarManual()" style="font-size: 0.8rem; background: rgba(76, 175, 80, 0.2); color: #ffffff; border: 1px solid rgba(76, 175, 80, 0.5);" title="Salvar dados atuais no navegador">
+          💾 Salvar Local
+        </button>
         <button type="button" class="btn btn-secondary btn-sm" onclick="app.limparTodosOsDados()" style="font-size: 0.8rem; background: rgba(255,255,255,0.15); color: #ffffff; border: 1px solid rgba(255,255,255,0.3);" title="Apagar dados deste computador e reiniciar formulário limpo">
-          🔄 Novo Preenchimento
+          🔄 Novo
         </button>
       </div>
     </div>
@@ -122,9 +128,9 @@
               </div>
 
               <div class="form-group">
-                <label for="docentePeriodo">Ano de Vigência (Anual) <span class="required">*</span></label>
-                <input type="text" id="docentePeriodo" class="form-control" value="2025" placeholder="Ex: 2025" required>
-                <p class="form-helper">Ano de vigência do plano/relatório</p>
+                <label for="docentePeriodo">Semestre de Vigência (Semestral) <span class="required">*</span></label>
+                <input type="text" id="docentePeriodo" class="form-control" value="2025/1" placeholder="Ex: 2025/1" required>
+                <p class="form-helper">Semestre de vigência do plano/relatório</p>
               </div>
 
               <div class="form-group form-group-full">
@@ -297,9 +303,10 @@
           <thead>
             <tr>
               <th style="width: 50px; text-align: center;">Item</th>
-              <th style="width: 40%;">Descrição do Item / Atividade Cadastrada</th>
-              <th style="width: 25%;">Observação / Limite Regulamentar</th>
-              <th style="width: 15%; text-align: right;">Carga Horária</th>
+              <th style="width: 25%;">Descrição Regulamentar</th>
+              <th style="width: 35%;">Atividades Lançadas</th>
+              <th style="width: 15%;">Observação / Limite</th>
+              <th style="width: 10%; text-align: right;">Carga Horária</th>
             </tr>
           </thead>
           <tbody id="reportCompiledTbody">
@@ -408,6 +415,7 @@
   </footer>
 
   <!-- Scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/exceljs.min.js"></script>
   <script src="js/data.js"></script>
   <script src="js/app.js"></script>
