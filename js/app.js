@@ -34,8 +34,22 @@ const app = {
   /**
    * Inicialização da Aplicação
    */
-  init() {
+  async init() {
     this.carregarDoLocalStorage();
+
+    // Verifica sessão do usuário logado
+    const sessao = auth.obterSessao();
+    if (!sessao) {
+      this.mostrarAuthOverlay();
+    } else {
+      // Docente autenticado
+      this.aplicarDadosUsuarioLogado(sessao);
+      await this.listarPlanosDocente();
+      if (sessao.is_admin) {
+        this.verificarPendenciasAdmin();
+      }
+    }
+
     this.inicializarCampos();
     this.atualizarHeaderUsuario();
     this.navegarPara(this.state.etapaAtual || "identificacao");
@@ -50,12 +64,353 @@ const app = {
       });
     }
 
-    // Atalho ESC para fechar modal
+    const modalNovo = document.getElementById("novoPreenchimentoModal");
+    if (modalNovo) {
+      modalNovo.addEventListener("click", (e) => {
+        if (e.target === modalNovo) {
+          app.fecharModalNovoPreenchimento();
+        }
+      });
+    }
+
+    const modalAdmin = document.getElementById("adminModal");
+    if (modalAdmin) {
+      modalAdmin.addEventListener("click", (e) => {
+        if (e.target === modalAdmin) {
+          app.fecharPainelAdmin();
+        }
+      });
+    }
+
+    // Atalho ESC para fechar modais
     document.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
         app.fecharModal();
+        app.fecharModalNovoPreenchimento();
+        app.fecharPainelAdmin();
       }
     });
+  },
+
+  /**
+   * Aplica dados do usuário autenticado no estado da aplicação e atualiza o painel
+   */
+  aplicarDadosUsuarioLogado(usuario) {
+    if (!usuario) return;
+    this.state.docente.nome = usuario.nome || this.state.docente.nome;
+    this.state.docente.siape = usuario.siape || this.state.docente.siape;
+    this.state.docente.regime = usuario.regime || this.state.docente.regime;
+    this.state.docente.unidade = usuario.unidade || this.state.docente.unidade;
+
+    const elNome = document.getElementById("dashUserNome");
+    const elSiape = document.getElementById("dashUserSiape");
+    const elUnidade = document.getElementById("dashUserUnidade");
+    const elRegime = document.getElementById("dashUserRegime");
+    const elAvatar = document.getElementById("dashUserAvatar");
+
+    if (elNome) elNome.textContent = usuario.nome;
+    if (elSiape) elSiape.textContent = usuario.siape;
+    if (elUnidade) elUnidade.textContent = usuario.unidade || "Instituto de Artes e Design (IAD)";
+    if (elRegime) {
+      const regMap = { "40_DE": "40h DE", "40": "40h Semanal", "20": "20h Semanal" };
+      elRegime.textContent = regMap[usuario.regime] || usuario.regime;
+    }
+    if (elAvatar && usuario.nome) {
+      elAvatar.textContent = usuario.nome.charAt(0).toUpperCase();
+    }
+
+    const btnAdmin = document.getElementById("btnAdminPainel");
+    if (btnAdmin) {
+      btnAdmin.style.display = usuario.is_admin ? "inline-flex" : "none";
+    }
+  },
+
+  /**
+   * Lista todos os planos de trabalho salvos do docente logado (Nuvem e Local)
+   */
+  async listarPlanosDocente() {
+    const container = document.getElementById("listaPlanosContainer");
+    if (!container) return;
+
+    container.innerHTML = `
+      <div style="grid-column: 1 / -1; text-align: center; padding: 2.5rem; color: var(--text-muted);">
+        🔄 Carregando seus planos de trabalho da nuvem...
+      </div>
+    `;
+
+    const siape = this.state.docente.siape;
+    let planos = [];
+
+    if (supabaseClient && siape) {
+      try {
+        const { data, error } = await supabaseClient
+          .from('pit_rit_documentos')
+          .select('*')
+          .eq('siape', siape)
+          .order('periodo', { ascending: false });
+
+        if (!error && data) {
+          planos = data;
+        }
+      } catch (e) {
+        console.warn("Erro ao buscar planos do Supabase:", e);
+      }
+    }
+
+    // Se houver dados no estado local que não estão na lista, mescla
+    if (this.state.docente.periodo && Object.keys(this.state.atividades || {}).length > 0) {
+      const jaExiste = planos.some(p => p.periodo === this.state.docente.periodo && (p.tipo_doc || 'PIT') === (this.state.docente.tipoDoc || 'PIT'));
+      if (!jaExiste) {
+        planos.unshift({
+          id: "local_ativo",
+          siape: this.state.docente.siape,
+          nome: this.state.docente.nome,
+          periodo: this.state.docente.periodo,
+          tipo_doc: this.state.docente.tipoDoc || "PIT",
+          regime: this.state.docente.regime || "40_DE",
+          unidade: this.state.docente.unidade,
+          atividades: this.state.atividades,
+          updated_at: new Date().toISOString()
+        });
+      }
+    }
+
+    this.planosCache = planos;
+    this.renderizarListaPlanos(planos);
+  },
+
+  /**
+   * Renderiza os cards de planos na Central de Planos
+   */
+  renderizarListaPlanos(planos) {
+    const container = document.getElementById("listaPlanosContainer");
+    if (!container) return;
+
+    if (!planos || planos.length === 0) {
+      container.innerHTML = `
+        <div class="empty-plans-state" style="grid-column: 1 / -1;">
+          <div class="empty-plans-icon">📑</div>
+          <h3>Nenhum plano cadastrado no momento</h3>
+          <p>Você ainda não possui planos de trabalho ou relatórios salvos. Clique no botão abaixo para iniciar seu primeiro preenchimento.</p>
+          <button type="button" class="btn btn-primary" onclick="app.abrirModalNovoPreenchimento()" style="padding: 0.75rem 1.6rem; font-size: 1rem;">
+            ➕ Iniciar Primeiro Preenchimento
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = "";
+
+    planos.forEach(plano => {
+      const card = document.createElement("div");
+      const tipo = (plano.tipo_doc || "PIT").toUpperCase();
+      const isRit = tipo === "RIT";
+      card.className = `plan-card ${isRit ? 'plan-rit' : 'plan-pit'}`;
+
+      let totalHorasSemanais = 0;
+      let totalHorasAnuais = 0;
+      let totalAtividades = 0;
+
+      if (plano.atividades) {
+        Object.keys(plano.atividades).forEach(itemId => {
+          const acts = plano.atividades[itemId] || [];
+          totalAtividades += acts.length;
+          const itemDef = this.buscarItemPorId(itemId);
+          acts.forEach(a => {
+            const h = parseFloat(a.horas) || 0;
+            if (itemDef && itemDef.unidade === "h/ano") {
+              totalHorasAnuais += h;
+            } else {
+              totalHorasSemanais += h;
+            }
+          });
+        });
+      }
+
+      const regimeLabelMap = {
+        "40_DE": "40h DE",
+        "40": "40h Semanal",
+        "20": "20h Semanal"
+      };
+      const regimeLabel = regimeLabelMap[plano.regime] || plano.regime || "40h DE";
+
+      let dataFormatada = "-";
+      if (plano.updated_at) {
+        try {
+          const d = new Date(plano.updated_at);
+          dataFormatada = d.toLocaleDateString("pt-BR") + " às " + d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+        } catch(e) {}
+      }
+
+      card.innerHTML = `
+        <div class="plan-card-top">
+          <div>
+            <div class="plan-semester-badge">Semestre ${this.escaparHtml(plano.periodo || "2026.3")}</div>
+            <span style="font-size: 0.8rem; color: var(--text-muted);">Salvo em ${dataFormatada}</span>
+          </div>
+          <span class="plan-type-pill ${isRit ? 'pill-rit' : 'pill-pit'}">
+            ${tipo === 'PIT' ? '📋 PIT' : '📊 RIT'}
+          </span>
+        </div>
+
+        <div class="plan-card-body">
+          <div class="plan-metric">
+            <span class="plan-metric-label">Regime:</span>
+            <span class="plan-metric-value">${this.escaparHtml(regimeLabel)}</span>
+          </div>
+          <div class="plan-metric">
+            <span class="plan-metric-label">Carga Horária Semanal:</span>
+            <span class="plan-metric-value" style="color: var(--primary); font-size: 0.95rem;">${totalHorasSemanais} h/semana</span>
+          </div>
+          ${totalHorasAnuais > 0 ? `
+          <div class="plan-metric">
+            <span class="plan-metric-label">Carga Horária Anual:</span>
+            <span class="plan-metric-value">${totalHorasAnuais} h/ano</span>
+          </div>
+          ` : ''}
+          <div class="plan-metric">
+            <span class="plan-metric-label">Lançamentos:</span>
+            <span class="plan-metric-value">${totalAtividades} atividade(s)</span>
+          </div>
+        </div>
+
+        <div class="plan-card-actions">
+          <button type="button" class="btn btn-primary btn-sm" onclick="app.abrirPlano('${plano.id || ''}', '${plano.periodo}', '${plano.tipo_doc}')" title="Continuar preenchendo este plano">
+            📂 Preencher
+          </button>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="app.abrirCompilacaoPlano('${plano.id || ''}', '${plano.periodo}', '${plano.tipo_doc}')" title="Visualizar compilação e imprimir">
+            📊 Relatório
+          </button>
+          <button type="button" class="btn btn-plan-delete" onclick="app.excluirPlano('${plano.id || ''}', '${plano.periodo}', '${plano.tipo_doc}')" title="Excluir este plano">
+            🗑️
+          </button>
+        </div>
+      `;
+
+      container.appendChild(card);
+    });
+  },
+
+  /**
+   * Abre o modal simplificado de Novo Preenchimento
+   */
+  abrirModalNovoPreenchimento() {
+    const modal = document.getElementById("novoPreenchimentoModal");
+    if (modal) {
+      const regSelect = document.getElementById("novoPlanoRegime");
+      if (regSelect && this.state.docente.regime) {
+        regSelect.value = this.state.docente.regime;
+      }
+      modal.classList.add("show");
+    }
+  },
+
+  /**
+   * Fecha o modal de Novo Preenchimento
+   */
+  fecharModalNovoPreenchimento() {
+    const modal = document.getElementById("novoPreenchimentoModal");
+    if (modal) {
+      modal.classList.remove("show");
+    }
+  },
+
+  /**
+   * Confirma o Novo Preenchimento selecionado pelo docente
+   */
+  confirmarNovoPreenchimento(event) {
+    if (event) event.preventDefault();
+
+    const tipoDoc = document.getElementById("novoPlanoTipoDoc")?.value || "PIT";
+    const regime = document.getElementById("novoPlanoRegime")?.value || "40_DE";
+    const semestre = document.getElementById("novoPlanoSemestre")?.value || "2026.3";
+
+    this.state.docente.tipoDoc = tipoDoc;
+    this.state.docente.regime = regime;
+    this.state.docente.periodo = semestre;
+    this.state.identificacaoSalva = true;
+
+    // Se já existia um plano para esse mesmo semestre e tipo, carrega as atividades existentes
+    const planoExistente = (this.planosCache || []).find(p => p.periodo === semestre && (p.tipo_doc || "PIT") === tipoDoc);
+
+    if (planoExistente && planoExistente.atividades && Object.keys(planoExistente.atividades).length > 0) {
+      this.state.atividades = JSON.parse(JSON.stringify(planoExistente.atividades));
+    } else {
+      this.state.atividades = {};
+    }
+
+    this.salvarNoLocalStorage();
+    this.fecharModalNovoPreenchimento();
+    this.atualizarHeaderUsuario();
+    this.sincronizarNuvem();
+    this.navegarPara("eixo1");
+  },
+
+  /**
+   * Abre um plano existente para edição a partir da lista
+   */
+  abrirPlano(planoId, periodo, tipoDoc) {
+    const plano = (this.planosCache || []).find(p => (planoId && p.id === planoId) || (p.periodo === periodo && (p.tipo_doc || "PIT") === (tipoDoc || "PIT")));
+    if (plano) {
+      this.state.docente.periodo = plano.periodo;
+      this.state.docente.tipoDoc = plano.tipo_doc || "PIT";
+      this.state.docente.regime = plano.regime || this.state.docente.regime;
+      this.state.atividades = plano.atividades || {};
+      this.state.identificacaoSalva = true;
+
+      this.salvarNoLocalStorage();
+      this.atualizarHeaderUsuario();
+      this.navegarPara("eixo1");
+    }
+  },
+
+  /**
+   * Abre diretamente a compilação/relatório de um plano existente
+   */
+  abrirCompilacaoPlano(planoId, periodo, tipoDoc) {
+    const plano = (this.planosCache || []).find(p => (planoId && p.id === planoId) || (p.periodo === periodo && (p.tipo_doc || "PIT") === (tipoDoc || "PIT")));
+    if (plano) {
+      this.state.docente.periodo = plano.periodo;
+      this.state.docente.tipoDoc = plano.tipo_doc || "PIT";
+      this.state.docente.regime = plano.regime || this.state.docente.regime;
+      this.state.atividades = plano.atividades || {};
+      this.state.identificacaoSalva = true;
+
+      this.salvarNoLocalStorage();
+      this.atualizarHeaderUsuario();
+      this.navegarPara("compilacao");
+    }
+  },
+
+  /**
+   * Exclui um plano de trabalho cadastrado
+   */
+  async excluirPlano(planoId, periodo, tipoDoc) {
+    const nomePlano = `${tipoDoc || 'PIT'} do semestre ${periodo}`;
+    if (!confirm(`Deseja realmente excluir o ${nomePlano}? Todas as atividades deste semestre serão removidas.`)) {
+      return;
+    }
+
+    if (supabaseClient && this.state.docente.siape) {
+      try {
+        await supabaseClient
+          .from('pit_rit_documentos')
+          .delete()
+          .match({ siape: this.state.docente.siape, periodo: periodo, tipo_doc: tipoDoc });
+      } catch (e) {
+        console.warn("Erro ao excluir do Supabase:", e);
+      }
+    }
+
+    // Se o plano excluído era o que estava ativo, limpa o estado ativo
+    if (this.state.docente.periodo === periodo && (this.state.docente.tipoDoc || 'PIT') === (tipoDoc || 'PIT')) {
+      this.state.atividades = {};
+      this.salvarNoLocalStorage();
+    }
+
+    await this.listarPlanosDocente();
+    alert(`O ${nomePlano} foi excluído com sucesso.`);
   },
 
   /**
@@ -70,10 +425,74 @@ const app = {
   },
 
   /**
+   * Sincronização automática contínua com a nuvem (Supabase)
+   */
+  async sincronizarNuvem(mostrarAlerta = false) {
+    const statusEl = document.getElementById("cloudSyncStatus");
+    if (statusEl) {
+      statusEl.textContent = "🔄 Sincronizando...";
+      statusEl.className = "cloud-sync-badge syncing";
+    }
+
+    if (!supabaseClient) {
+      if (statusEl) {
+        statusEl.textContent = "💾 Salvo localmente";
+        statusEl.className = "cloud-sync-badge";
+      }
+      return;
+    }
+
+    const { nome, siape, regime, unidade, periodo, tipoDoc } = this.state.docente;
+    if (!nome || !siape) {
+      if (statusEl) {
+        statusEl.textContent = "☁️ Aguardando dados";
+        statusEl.className = "cloud-sync-badge";
+      }
+      return;
+    }
+
+    try {
+      const payload = {
+        siape: siape,
+        nome: nome,
+        regime: regime,
+        unidade: unidade,
+        periodo: periodo,
+        tipo_doc: tipoDoc,
+        atividades: this.state.atividades,
+        updated_at: new Date().toISOString()
+      };
+
+      const { error } = await supabaseClient
+        .from('pit_rit_documentos')
+        .upsert(payload, { onConflict: 'siape,periodo,tipo_doc' });
+
+      if (error) throw error;
+
+      if (statusEl) {
+        statusEl.textContent = "☁️ Sincronizado";
+        statusEl.className = "cloud-sync-badge saved";
+      }
+
+      if (mostrarAlerta) {
+        alert("Dados salvos e sincronizados na nuvem com sucesso!");
+      }
+    } catch (err) {
+      console.warn("Erro ao sincronizar na nuvem:", err);
+      if (statusEl) {
+        statusEl.textContent = "⚠️ Nuvem pendente";
+        statusEl.className = "cloud-sync-badge";
+      }
+      if (mostrarAlerta) {
+        alert("Os dados foram salvos no seu navegador, mas houve instabilidade na conexão com a nuvem.");
+      }
+    }
+  },
+
+  /**
    * Salvamento manual explícito acionado pelo usuário
    */
   salvarManual() {
-    // Força atualização dos dados da identificação caso não tenham clicado em continuar
     const nome = document.getElementById("docenteNome")?.value.trim();
     if (nome) {
       this.state.docente.nome = nome;
@@ -85,57 +504,7 @@ const app = {
     }
 
     this.salvarNoLocalStorage();
-    alert("Dados salvos localmente com sucesso! Você pode fechar o sistema e continuar mais tarde.");
-  },
-
-  /**
-   * Envia os dados para a tabela pit_rit_documentos no Supabase
-   */
-  async salvarNoSupabase() {
-    if (!supabaseClient) {
-      alert("Erro de conexão com o banco de dados. Tente novamente.");
-      return;
-    }
-
-    // Força atualização dos dados da identificação caso o usuário não tenha clicado em continuar
-    const nome = document.getElementById("docenteNome")?.value.trim() || this.state.docente.nome;
-    const siape = document.getElementById("docenteSiape")?.value.trim() || this.state.docente.siape;
-    const regime = document.getElementById("docenteRegime")?.value || this.state.docente.regime;
-    const unidade = document.getElementById("docenteUnidade")?.value.trim() || this.state.docente.unidade;
-    const periodo = document.getElementById("docentePeriodo")?.value.trim() || this.state.docente.periodo;
-    const tipoDoc = document.getElementById("docenteTipoDoc")?.value || this.state.docente.tipoDoc;
-
-    if (!nome || !siape) {
-      alert("É necessário preencher pelo menos Nome e SIAPE para enviar os dados.");
-      return;
-    }
-
-    try {
-      // Usa upsert com onConflict para evitar requisições PATCH (que causam erro de CORS
-      // quando o arquivo é aberto localmente como file://). O upsert usa POST internamente,
-      // que é permitido pelo CORS sem preflight.
-      // Requer que a tabela tenha uma constraint UNIQUE em (siape, periodo, tipo_doc).
-      const payload = {
-        siape: siape,
-        nome: nome,
-        regime: regime,
-        unidade: unidade,
-        periodo: periodo,
-        tipo_doc: tipoDoc,
-        atividades: this.state.atividades
-      };
-
-      const { error } = await supabaseClient
-        .from('pit_rit_documentos')
-        .upsert(payload, { onConflict: 'siape,periodo,tipo_doc' });
-
-      if (error) throw error;
-
-      alert("Dados enviados para o Supabase com sucesso!");
-    } catch (err) {
-      console.error("Erro ao salvar no Supabase:", err);
-      alert("Houve um erro ao enviar para a nuvem: " + (err.message || JSON.stringify(err)) + "\n\nPor favor, verifique o Console do navegador (F12).");
-    }
+    this.sincronizarNuvem(true);
   },
 
   /**
@@ -217,6 +586,7 @@ const app = {
 
     this.salvarNoLocalStorage();
     this.atualizarHeaderUsuario();
+    this.sincronizarNuvem();
     this.navegarPara("eixo1");
   },
 
@@ -236,9 +606,9 @@ const app = {
    * Navega entre as seções/etapas do sistema
    */
   navegarPara(etapaId) {
-    // Se ainda não salvou identificação e tenta acessar eixos ou compilação
-    if (etapaId !== "identificacao" && (!this.state.docente.nome || !this.state.docente.siape)) {
-      alert("Por favor, preencha primeiro a sua Identificação (Nome e SIAPE) antes de acessar os eixos.");
+    // Se ainda não escolheu um plano/semestre e tenta acessar eixos ou compilação
+    if (etapaId !== "identificacao" && (!this.state.docente.nome || !this.state.docente.siape || !this.state.docente.periodo)) {
+      alert("Por favor, selecione um plano de trabalho cadastrado ou clique em '➕ Novo Preenchimento' para iniciar.");
       etapaId = "identificacao";
     }
 
@@ -254,6 +624,11 @@ const app = {
     steps.forEach(step => {
       step.classList.remove("active");
     });
+
+    // Se voltou para a tela inicial / Meus Planos, atualiza a lista de planos
+    if (etapaId === "identificacao") {
+      this.listarPlanosDocente();
+    }
 
     // Verifica se a etapa é um Eixo configurado na base de dados
     const eixoConfig = PIT_RIT_DATA.eixos.find(e => e.id === etapaId);
@@ -291,7 +666,7 @@ const app = {
     }
 
     // Libera passos do stepper se identificado
-    if (this.state.docente.nome && this.state.docente.siape) {
+    if (this.state.docente.nome && this.state.docente.siape && this.state.docente.periodo) {
       steps.forEach(s => s.classList.remove("disabled"));
     }
 
@@ -367,7 +742,7 @@ const app = {
     const btnAvancar = document.getElementById("btnEixoAvancar");
 
     if (eixoId === "eixo1") {
-      if (btnVoltar) btnVoltar.innerHTML = `&larr; Voltar para Identificação`;
+      if (btnVoltar) btnVoltar.innerHTML = `&larr; Voltar para Meus Planos`;
       if (btnAvancar) btnAvancar.innerHTML = `Avançar para Eixo 2 (Pesquisa) &rarr;`;
     } else if (eixoId === "eixo2") {
       if (btnVoltar) btnVoltar.innerHTML = `&larr; Voltar para Eixo 1 (Ensino)`;
@@ -655,6 +1030,7 @@ const app = {
     }
 
     this.salvarNoLocalStorage();
+    this.sincronizarNuvem();
     this.fecharModal();
     
     // Re-renderiza o eixo atual
@@ -683,6 +1059,7 @@ const app = {
     }
 
     this.salvarNoLocalStorage();
+    this.sincronizarNuvem();
     if (this.state.eixoAtivoId) {
       const eixo = PIT_RIT_DATA.eixos.find(e => e.id === this.state.eixoAtivoId);
       if (eixo) {
@@ -1411,6 +1788,480 @@ const app = {
         localStorage.removeItem("pit_rit_dados_v1");
       } catch (e) {}
       window.location.reload();
+    }
+  },
+
+  // ==========================================
+  // MÓDULO DE AUTENTICAÇÃO E MODERAÇÃO ADMIN
+  // ==========================================
+
+  /**
+   * Exibe o overlay modal de Login e Cadastro
+   */
+  mostrarAuthOverlay() {
+    const overlay = document.getElementById("authOverlay");
+    if (overlay) {
+      overlay.classList.add("show");
+    }
+  },
+
+  /**
+   * Oculta o overlay modal de Login e Cadastro
+   */
+  fecharAuthOverlay() {
+    const overlay = document.getElementById("authOverlay");
+    if (overlay) {
+      overlay.classList.remove("show");
+    }
+  },
+
+  /**
+   * Alterna entre a aba de Entrar e a de Solicitar Cadastro
+   */
+  alternarAuthTab(tab) {
+    const tabLogin = document.getElementById("tabBtnLogin");
+    const tabCadastro = document.getElementById("tabBtnCadastro");
+    const formLogin = document.getElementById("formLogin");
+    const formCadastro = document.getElementById("formCadastro");
+
+    this.limparAuthAlert();
+
+    if (tab === "login") {
+      tabLogin?.classList.add("active");
+      tabCadastro?.classList.remove("active");
+      if (formLogin) formLogin.style.display = "block";
+      if (formCadastro) formCadastro.style.display = "none";
+      document.getElementById("loginId")?.focus();
+    } else {
+      tabLogin?.classList.remove("active");
+      tabCadastro?.classList.add("active");
+      if (formLogin) formLogin.style.display = "none";
+      if (formCadastro) formCadastro.style.display = "block";
+      document.getElementById("cadNome")?.focus();
+    }
+  },
+
+  /**
+   * Exibe mensagens de feedback na tela de login/cadastro
+   */
+  exibirAuthAlert(tipo, mensagem) {
+    const alertBox = document.getElementById("authAlert");
+    if (!alertBox) return;
+
+    alertBox.className = `auth-alert auth-alert-${tipo}`;
+    let icone = "ℹ️";
+    if (tipo === "error") icone = "❌";
+    if (tipo === "warning") icone = "⏳";
+    if (tipo === "success") icone = "✅";
+
+    alertBox.innerHTML = `<span>${icone}</span><div>${mensagem}</div>`;
+    alertBox.style.display = "flex";
+  },
+
+  /**
+   * Limpa o alerta da tela de login/cadastro
+   */
+  limparAuthAlert() {
+    const alertBox = document.getElementById("authAlert");
+    if (alertBox) {
+      alertBox.style.display = "none";
+      alertBox.innerHTML = "";
+    }
+  },
+
+  /**
+   * Processa a submissão do formulário de Login
+   */
+  async handleLogin(e) {
+    e.preventDefault();
+    this.limparAuthAlert();
+
+    const idInput = document.getElementById("loginId");
+    const senhaInput = document.getElementById("loginSenha");
+    const lembrarInput = document.getElementById("loginLembrar");
+    const btnSubmit = document.getElementById("btnLoginSubmit");
+
+    const identificador = idInput?.value.trim();
+    const senha = senhaInput?.value;
+    const manter = lembrarInput ? lembrarInput.checked : true;
+
+    if (!identificador || !senha) {
+      this.exibirAuthAlert("error", "Informe seu E-mail ou SIAPE e sua senha.");
+      return;
+    }
+
+    if (btnSubmit) {
+      btnSubmit.disabled = true;
+      btnSubmit.textContent = "Verificando credenciais...";
+    }
+
+    try {
+      const resultado = await auth.login(identificador, senha);
+
+      if (!resultado.success) {
+        if (resultado.pendente) {
+          this.exibirAuthAlert("warning", resultado.message);
+        } else if (resultado.rejeitado) {
+          this.exibirAuthAlert("error", resultado.message);
+        } else {
+          this.exibirAuthAlert("error", resultado.message || "Usuário ou senha inválidos.");
+        }
+        return;
+      }
+
+      // Login com sucesso!
+      const usuario = resultado.usuario;
+      this.fecharAuthOverlay();
+      this.aplicarDadosUsuarioLogado(usuario);
+
+      // Carrega automaticamente os dados lançados do docente
+      await this.carregarDadosDocenteNuvem(usuario.siape);
+
+      if (usuario.is_admin) {
+        this.verificarPendenciasAdmin();
+      }
+
+      this.atualizarHeaderUsuario();
+      this.navegarPara("identificacao");
+
+      if (senhaInput) senhaInput.value = "";
+    } catch (err) {
+      console.error("Erro no login:", err);
+      this.exibirAuthAlert("error", "Erro ao processar login: " + (err.message || err));
+    } finally {
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = "Entrar no Sistema";
+      }
+    }
+  },
+
+  /**
+   * Processa a solicitação de cadastro do docente
+   */
+  async handleCadastro(e) {
+    e.preventDefault();
+    this.limparAuthAlert();
+
+    const nome = document.getElementById("cadNome")?.value.trim();
+    const email = document.getElementById("cadEmail")?.value.trim();
+    const siape = document.getElementById("cadSiape")?.value.trim();
+    const regime = document.getElementById("cadRegime")?.value;
+    const senha = document.getElementById("cadSenha")?.value;
+    const senhaConf = document.getElementById("cadSenhaConf")?.value;
+    const btnSubmit = document.getElementById("btnCadSubmit");
+
+    if (!nome || !email || !siape || !senha) {
+      this.exibirAuthAlert("error", "Por favor, preencha todos os campos obrigatórios.");
+      return;
+    }
+
+    if (senha.length < 6) {
+      this.exibirAuthAlert("error", "A senha deve conter no mínimo 6 caracteres.");
+      return;
+    }
+
+    if (senha !== senhaConf) {
+      this.exibirAuthAlert("error", "A confirmação de senha não confere.");
+      return;
+    }
+
+    if (btnSubmit) {
+      btnSubmit.disabled = true;
+      btnSubmit.textContent = "Enviando solicitação...";
+    }
+
+    try {
+      const resp = await auth.cadastrarDocente({
+        nome,
+        email,
+        siape,
+        regime,
+        unidade: "Instituto de Artes e Design (IAD)",
+        senha
+      });
+
+      if (!resp.success) {
+        this.exibirAuthAlert("error", resp.message);
+        return;
+      }
+
+      // Sucesso no cadastro
+      this.exibirAuthAlert("success", "<strong>Cadastro solicitado com sucesso!</strong><br>" + resp.message);
+
+      // Limpa formulário de cadastro
+      document.getElementById("formCadastro")?.reset();
+
+      // Preenche o campo de login com o e-mail cadastrado e volta para a aba login após 3s
+      const loginId = document.getElementById("loginId");
+      if (loginId) loginId.value = email;
+
+      setTimeout(() => {
+        this.alternarAuthTab("login");
+        this.exibirAuthAlert("warning", "Sua solicitação está em análise. Você poderá fazer login assim que a Secretaria aprovar.");
+      }, 2500);
+
+    } catch (err) {
+      console.error("Erro ao cadastrar:", err);
+      this.exibirAuthAlert("error", "Erro ao realizar cadastro: " + (err.message || err));
+    } finally {
+      if (btnSubmit) {
+        btnSubmit.disabled = false;
+        btnSubmit.textContent = "Solicitar Cadastro";
+      }
+    }
+  },
+
+  /**
+   * Preenche credenciais da Secretaria para facilitar o acesso administrativo
+   */
+  preencherLoginAdmin() {
+    this.alternarAuthTab("login");
+    const loginId = document.getElementById("loginId");
+    const loginSenha = document.getElementById("loginSenha");
+    if (loginId) loginId.value = "admin@iad.ufjf.br";
+    if (loginSenha) {
+      loginSenha.value = "";
+      loginSenha.focus();
+    }
+    this.exibirAuthAlert("info", "Acesso Secretaria: Digite a senha administrativa para entrar.");
+  },
+
+  /**
+   * Abre o Painel Administrativo de Moderação de Cadastros
+   */
+  async abrirPainelAdmin() {
+    const modal = document.getElementById("adminModal");
+    if (modal) {
+      modal.classList.add("show");
+      await this.carregarUsuariosAdmin();
+    }
+  },
+
+  /**
+   * Fecha o Painel Administrativo de Moderação
+   */
+  fecharPainelAdmin() {
+    const modal = document.getElementById("adminModal");
+    if (modal) {
+      modal.classList.remove("show");
+    }
+  },
+
+  /**
+   * Carrega e lista usuários cadastrados no Painel do Administrador
+   */
+  async carregarUsuariosAdmin() {
+    const tbody = document.getElementById("tbodyAdminUsuarios");
+    if (!tbody) return;
+
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+          🔄 Carregando cadastros...
+        </td>
+      </tr>
+    `;
+
+    try {
+      const usuarios = await auth.listarUsuarios();
+      this.adminUsuariosCache = usuarios || [];
+      this.atualizarContadoresAdmin(this.adminUsuariosCache);
+      this.filtrarAdminUsuarios(this.adminFiltroAtual || "todos");
+    } catch (e) {
+      console.error("Erro ao carregar usuários:", e);
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--danger); padding: 2rem;">
+            Erro ao carregar lista de usuários. Verifique o console.
+          </td>
+        </tr>
+      `;
+    }
+  },
+
+  /**
+   * Atualiza os contadores de status do painel admin
+   */
+  atualizarContadoresAdmin(usuarios) {
+    const total = usuarios.length;
+    const pendentes = usuarios.filter(u => u.status === "pendente").length;
+    const aprovados = usuarios.filter(u => u.status === "aprovado").length;
+    const rejeitados = usuarios.filter(u => u.status === "rejeitado").length;
+
+    const elTotal = document.getElementById("countTodos");
+    const elPendentes = document.getElementById("countPendentes");
+    const elAprovados = document.getElementById("countAprovados");
+    const elRejeitados = document.getElementById("countRejeitados");
+    const badgeHeader = document.getElementById("adminPendingBadge");
+
+    if (elTotal) elTotal.textContent = total;
+    if (elPendentes) elPendentes.textContent = pendentes;
+    if (elAprovados) elAprovados.textContent = aprovados;
+    if (elRejeitados) elRejeitados.textContent = rejeitados;
+
+    if (badgeHeader) {
+      if (pendentes > 0) {
+        badgeHeader.style.display = "inline-flex";
+        badgeHeader.textContent = pendentes;
+      } else {
+        badgeHeader.style.display = "none";
+      }
+    }
+  },
+
+  /**
+   * Verifica em background se existem pendências para alertar o admin
+   */
+  async verificarPendenciasAdmin() {
+    try {
+      const usuarios = await auth.listarUsuarios();
+      this.atualizarContadoresAdmin(usuarios);
+    } catch (e) {}
+  },
+
+  /**
+   * Filtra a visualização na tabela de administração
+   */
+  filtrarAdminUsuarios(filtro, btnEl) {
+    this.adminFiltroAtual = filtro;
+
+    if (btnEl) {
+      document.querySelectorAll(".admin-stat-pill").forEach(p => p.classList.remove("active"));
+      btnEl.classList.add("active");
+    }
+
+    const lista = this.adminUsuariosCache || [];
+    let filtrados = lista;
+    if (filtro !== "todos") {
+      filtrados = lista.filter(u => u.status === filtro);
+    }
+
+    this.renderizarTabelaAdmin(filtrados);
+  },
+
+  /**
+   * Renderiza a tabela de docentes no painel administrativo
+   */
+  renderizarTabelaAdmin(lista) {
+    const tbody = document.getElementById("tbodyAdminUsuarios");
+    if (!tbody) return;
+
+    if (lista.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+            Nenhum docente encontrado para o filtro selecionado.
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    tbody.innerHTML = "";
+    lista.forEach(u => {
+      const tr = document.createElement("tr");
+
+      let badgeClass = "badge-status-pendente";
+      let statusLabel = "⏳ Pendente";
+      if (u.status === "aprovado") {
+        badgeClass = "badge-status-aprovado";
+        statusLabel = "✅ Aprovado";
+      } else if (u.status === "rejeitado") {
+        badgeClass = "badge-status-rejeitado";
+        statusLabel = "❌ Rejeitado";
+      }
+
+      let acoesHtml = `
+        <div class="admin-actions" style="justify-content: flex-end;">
+      `;
+
+      if (u.status !== "aprovado") {
+        acoesHtml += `
+          <button type="button" class="btn-admin-action btn-admin-approve" onclick="app.aprovarDocente('${u.id}')" title="Aprovar login deste docente">
+            ✅ Aprovar
+          </button>
+        `;
+      }
+
+      if (u.status !== "rejeitado") {
+        acoesHtml += `
+          <button type="button" class="btn-admin-action btn-admin-reject" onclick="app.rejeitarDocente('${u.id}')" title="Rejeitar ou suspender login">
+            ❌ Rejeitar
+          </button>
+        `;
+      }
+
+      if (!u.is_admin) {
+        acoesHtml += `
+          <button type="button" class="btn-admin-action btn-admin-delete" onclick="app.excluirDocente('${u.id}')" title="Excluir cadastro">
+            🗑️
+          </button>
+        `;
+      }
+
+      acoesHtml += `</div>`;
+
+      tr.innerHTML = `
+        <td>
+          <strong>${this.escaparHtml(u.nome)}</strong>
+          ${u.is_admin ? '<span style="font-size: 0.7rem; background: #e0e7ff; color: #3730a3; padding: 1px 5px; border-radius: 4px; margin-left: 4px;">Admin</span>' : ''}
+        </td>
+        <td><code>${this.escaparHtml(u.siape)}</code></td>
+        <td>${this.escaparHtml(u.email)}</td>
+        <td>${this.escaparHtml(u.regime || "40_DE")}</td>
+        <td><span class="badge-status ${badgeClass}">${statusLabel}</span></td>
+        <td style="text-align: right;">${acoesHtml}</td>
+      `;
+
+      tbody.appendChild(tr);
+    });
+  },
+
+  /**
+   * Aprova um docente pelo ID
+   */
+  async aprovarDocente(userId) {
+    if (!confirm("Deseja APROVAR o acesso deste docente?")) return;
+
+    const userObj = (this.adminUsuariosCache || []).find(u => u.id === userId);
+    const resp = await auth.aprovarUsuario(userId, userObj);
+    if (resp.success) {
+      await this.carregarUsuariosAdmin();
+      alert("Docente aprovado com sucesso! O acesso está liberado.");
+    } else {
+      alert("Erro ao aprovar: " + (resp.message || "Tente novamente."));
+    }
+  },
+
+  /**
+   * Rejeita um docente pelo ID
+   */
+  async rejeitarDocente(userId) {
+    if (!confirm("Deseja REJEITAR o acesso deste docente?")) return;
+
+    const userObj = (this.adminUsuariosCache || []).find(u => u.id === userId);
+    const resp = await auth.rejeitarUsuario(userId, userObj);
+    if (resp.success) {
+      await this.carregarUsuariosAdmin();
+      alert("Cadastro do docente marcado como rejeitado.");
+    } else {
+      alert("Erro ao rejeitar: " + (resp.message || "Tente novamente."));
+    }
+  },
+
+  /**
+   * Exclui um docente pelo ID
+   */
+  async excluirDocente(userId) {
+    if (!confirm("Tem certeza que deseja EXCLUIR este cadastro? Esta ação não pode ser desfeita.")) return;
+
+    const resp = await auth.excluirUsuario(userId);
+    if (resp.success) {
+      await this.carregarUsuariosAdmin();
+      alert("Cadastro excluído com sucesso.");
+    } else {
+      alert("Erro ao excluir: " + (resp.message || "Tente novamente."));
     }
   },
 

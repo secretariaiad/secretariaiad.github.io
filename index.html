@@ -29,14 +29,20 @@
             <span>SIAPE: <strong id="headerDocenteSiape">-</strong></span>
           </div>
         </div>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="app.salvarNoSupabase()" style="font-size: 0.8rem; background: rgba(33, 150, 243, 0.2); color: #ffffff; border: 1px solid rgba(33, 150, 243, 0.5);" title="Enviar definitivamente os dados para o Supabase">
-          ☁️ Enviar Nuvem
+        <span id="cloudSyncStatus" class="cloud-sync-badge saved" title="Status de sincronização automática com a nuvem">
+          ☁️ Sincronizado
+        </span>
+        <button id="btnAdminPainel" type="button" class="btn btn-secondary btn-sm" onclick="app.abrirPainelAdmin()" style="display: none; font-size: 0.8rem; background: rgba(234, 179, 8, 0.25); color: #ffffff; border: 1px solid rgba(234, 179, 8, 0.6);" title="Aprovar cadastros de docentes">
+          ⚙️ Moderação <span id="adminPendingBadge" class="badge-status badge-status-pendente" style="display:none; margin-left: 4px; padding: 1px 6px; font-size: 0.7rem;">0</span>
         </button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="app.salvarManual()" style="font-size: 0.8rem; background: rgba(76, 175, 80, 0.2); color: #ffffff; border: 1px solid rgba(76, 175, 80, 0.5);" title="Salvar dados atuais no navegador">
-          💾 Salvar Local
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.salvarManual()" style="font-size: 0.8rem; background: rgba(76, 175, 80, 0.2); color: #ffffff; border: 1px solid rgba(76, 175, 80, 0.5);" title="Salvar dados atuais">
+          💾 Salvar
         </button>
-        <button type="button" class="btn btn-secondary btn-sm" onclick="app.limparTodosOsDados()" style="font-size: 0.8rem; background: rgba(255,255,255,0.15); color: #ffffff; border: 1px solid rgba(255,255,255,0.3);" title="Apagar dados deste computador e reiniciar formulário limpo">
-          🔄 Novo
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.abrirModalNovoPreenchimento()" style="font-size: 0.8rem; background: rgba(255,255,255,0.15); color: #ffffff; border: 1px solid rgba(255,255,255,0.3);" title="Iniciar novo plano de trabalho para outro semestre">
+          ➕ Novo Preenchimento
+        </button>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="auth.logout()" style="font-size: 0.8rem; background: rgba(239, 68, 68, 0.2); color: #ffffff; border: 1px solid rgba(239, 68, 68, 0.4);" title="Encerrar sessão no sistema">
+          🚪 Sair
         </button>
       </div>
     </div>
@@ -49,7 +55,7 @@
     <ul class="stepper-nav" id="stepperNav">
       <li class="step-item active" data-step="identificacao" onclick="app.navegarPara('identificacao')">
         <span class="step-badge">1</span>
-        <span>Identificação</span>
+        <span>Meus Planos</span>
       </li>
       <li class="step-item disabled" data-step="eixo1" onclick="app.navegarPara('eixo1')">
         <span class="step-badge">2</span>
@@ -88,67 +94,41 @@
   <main class="main-container">
 
     <!-- ==========================================
-         SEÇÃO 1: Identificação do Docente
+         SEÇÃO 1: Painel de Planos do Docente
          ========================================== -->
     <section id="view-identificacao" class="view-section active-view">
-      <div class="card-identification">
-        <div class="card-header-gradient">
-          <h2>📝 Identificação do Docente</h2>
-          <p>Informe seus dados cadastrais para inicializar a tabela e a compilação do PIT/RIT.</p>
-        </div>
-        <div class="card-body">
-          <form id="formIdentificacao" onsubmit="event.preventDefault(); app.salvarIdentificacao();">
-            <div class="form-grid">
-              <div class="form-group form-group-full">
-                <label for="docenteNome">Nome Completo <span class="required">*</span></label>
-                <input type="text" id="docenteNome" class="form-control" placeholder="Ex: Maria da Silva Souza" required autofocus>
-                <p class="form-helper">Nome institucional do docente</p>
-              </div>
-
-              <div class="form-group">
-                <label for="docenteSiape">Matrícula SIAPE <span class="required">*</span></label>
-                <input type="text" id="docenteSiape" class="form-control" placeholder="Ex: 1234567" required>
-                <p class="form-helper">Número de matrícula no SIAPE</p>
-              </div>
-
-              <div class="form-group">
-                <label for="docenteRegime">Regime de Trabalho <span class="required">*</span></label>
-                <select id="docenteRegime" class="form-control" required onchange="app.atualizarRegime()">
-                  <option value="40_DE">Dedicação Exclusiva (40h DE)</option>
-                  <option value="40">40 horas semanais</option>
-                  <option value="20">20 horas semanais</option>
-                </select>
-                <p class="form-helper">Base para cálculo dos limites percentuais dos eixos</p>
-              </div>
-
-              <div class="form-group">
-                <label for="docenteUnidade">Unidade / Departamento</label>
-                <input type="text" id="docenteUnidade" class="form-control" value="Instituto de Artes e Design (IAD)">
-                <p class="form-helper">Unidade acadêmica de lotação</p>
-              </div>
-
-              <div class="form-group">
-                <label for="docentePeriodo">Semestre de Vigência (Semestral) <span class="required">*</span></label>
-                <input type="text" id="docentePeriodo" class="form-control" value="2025/1" placeholder="Ex: 2025/1" required>
-                <p class="form-helper">Semestre de vigência do plano/relatório</p>
-              </div>
-
-              <div class="form-group form-group-full">
-                <label for="docenteTipoDoc">Tipo de Documento</label>
-                <select id="docenteTipoDoc" class="form-control">
-                  <option value="PIT">PIT — Plano Individual de Trabalho (Previsão)</option>
-                  <option value="RIT">RIT — Relatório Individual de Trabalho (Executado)</option>
-                </select>
-              </div>
+      <!-- Card de Identificação do Docente Logado -->
+      <div class="dashboard-user-card">
+        <div class="dashboard-user-info">
+          <div class="dashboard-user-avatar" id="dashUserAvatar">👤</div>
+          <div class="dashboard-user-details">
+            <h3 id="dashUserNome">Docente</h3>
+            <div class="dashboard-user-meta">
+              <span>🆔 SIAPE: <strong id="dashUserSiape">-</strong></span>
+              <span>🏢 <span id="dashUserUnidade">Instituto de Artes e Design (IAD)</span></span>
+              <span>⏱️ Regime: <strong id="dashUserRegime">40h DE</strong></span>
             </div>
-            
-            <div class="card-footer-actions" style="margin-top: 1.5rem; margin-left: -2rem; margin-right: -2rem; margin-bottom: -2rem;">
-              <button type="submit" class="btn btn-primary" style="font-size: 1rem; padding: 0.8rem 2rem;">
-                Continuar para Eixo 1 &rarr;
-              </button>
-            </div>
-          </form>
+          </div>
         </div>
+        <button type="button" class="btn btn-primary" onclick="app.abrirModalNovoPreenchimento()" style="padding: 0.75rem 1.4rem; font-size: 0.95rem;">
+          ➕ Novo Preenchimento
+        </button>
+      </div>
+
+      <!-- Cabeçalho da Lista de Planos -->
+      <div class="plans-header-row">
+        <div class="plans-header-title">
+          <h2>📋 Meus Planos de Trabalho e Relatórios</h2>
+          <p>Consulte seus lançamentos por semestre, continue o preenchimento ou inicie um novo plano.</p>
+        </div>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="app.listarPlanosDocente()" title="Recarregar planos salvos na nuvem">
+          🔄 Atualizar Planos
+        </button>
+      </div>
+
+      <!-- Grid de Planos Cadastrados (Preenchido dinamicamente via JS) -->
+      <div id="listaPlanosContainer" class="plans-grid">
+        <!-- Renderizado dinamicamente -->
       </div>
     </section>
 
@@ -407,6 +387,226 @@
   </div>
 
   <!-- ==========================================
+       Modal de Novo Preenchimento Simplificado
+       ========================================== -->
+  <div id="novoPreenchimentoModal" class="modal-backdrop">
+    <div class="modal-dialog" style="max-width: 500px;">
+      <div class="modal-header">
+        <div>
+          <h3 style="margin-bottom: 0.2rem;">➕ Novo Preenchimento</h3>
+          <p>Defina o documento, carga horária e o semestre</p>
+        </div>
+        <button type="button" class="btn-close-modal" onclick="app.fecharModalNovoPreenchimento()">&times;</button>
+      </div>
+
+      <form id="formNovoPreenchimento" onsubmit="app.confirmarNovoPreenchimento(event)">
+        <div class="modal-body">
+          <div class="form-group" style="margin-bottom: 1.25rem;">
+            <label for="novoPlanoTipoDoc">Tipo de Documento <span class="required">*</span></label>
+            <select id="novoPlanoTipoDoc" class="form-control" required>
+              <option value="PIT">PIT — Plano Individual de Trabalho (Previsão Semestral)</option>
+              <option value="RIT">RIT — Relatório Individual de Trabalho (Executado no Semestre)</option>
+            </select>
+            <p class="form-helper">Selecione se é a previsão (PIT) ou o relatório executado (RIT)</p>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 1.25rem;">
+            <label for="novoPlanoRegime">Carga Horária / Regime de Trabalho <span class="required">*</span></label>
+            <select id="novoPlanoRegime" class="form-control" required>
+              <option value="40_DE">Dedicação Exclusiva (40h DE)</option>
+              <option value="40">40 horas semanais</option>
+              <option value="20">20 horas semanais</option>
+            </select>
+            <p class="form-helper">Carga horária semanal total vinculada ao seu regime</p>
+          </div>
+
+          <div class="form-group" style="margin-bottom: 1.25rem;">
+            <label for="novoPlanoSemestre">Semestre de Vigência <span class="required">*</span></label>
+            <select id="novoPlanoSemestre" class="form-control" required style="font-size: 1.1rem; font-weight: 700; color: var(--primary);">
+              <option value="2026.3">2026.3</option>
+              <option value="2027.1">2027.1</option>
+              <option value="2027.3">2027.3</option>
+              <option value="2028.1">2028.1</option>
+              <option value="2028.3">2028.3</option>
+            </select>
+            <p class="form-helper">Escolha o semestre letivo para o qual deseja lançar atividades</p>
+          </div>
+        </div>
+
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" onclick="app.fecharModalNovoPreenchimento()">Cancelar</button>
+          <button type="submit" class="btn btn-primary" style="padding: 0.65rem 1.5rem;">Iniciar Preenchimento &rarr;</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       Overlay / Modal de Autenticação (Login / Cadastro)
+       ========================================== -->
+  <div id="authOverlay" class="auth-overlay">
+    <div class="auth-card">
+      <div class="auth-header">
+        <div class="header-logo-badge">UFJF</div>
+        <h2>Sistema PIT / RIT</h2>
+        <p>Secretaria Virtual — Instituto de Artes e Design</p>
+      </div>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab-btn active" id="tabBtnLogin" onclick="app.alternarAuthTab('login')">
+          🔑 Entrar
+        </button>
+        <button type="button" class="auth-tab-btn" id="tabBtnCadastro" onclick="app.alternarAuthTab('cadastro')">
+          📝 Solicitar Cadastro
+        </button>
+      </div>
+
+      <div class="auth-body">
+        <div id="authAlert" class="auth-alert" style="display: none;"></div>
+
+        <!-- Formulário de Login -->
+        <form id="formLogin" onsubmit="app.handleLogin(event)">
+          <div class="auth-form-group">
+            <label for="loginId">E-mail Institucional ou SIAPE</label>
+            <input type="text" id="loginId" placeholder="exemplo@ufjf.br ou 1234567" required autofocus autocomplete="username">
+          </div>
+
+          <div class="auth-form-group">
+            <label for="loginSenha">Senha</label>
+            <input type="password" id="loginSenha" placeholder="Digite sua senha" required autocomplete="current-password">
+          </div>
+
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+            <label style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.85rem; cursor: pointer; margin-bottom: 0;">
+              <input type="checkbox" id="loginLembrar" checked>
+              <span>Lembrar de mim</span>
+            </label>
+            <a href="javascript:void(0)" onclick="app.preencherLoginAdmin()" style="font-size: 0.8rem; color: var(--primary); text-decoration: none; font-weight: 600;">
+              Acesso Secretaria
+            </a>
+          </div>
+
+          <button type="submit" id="btnLoginSubmit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">
+            Entrar no Sistema
+          </button>
+        </form>
+
+        <!-- Formulário de Cadastro de Docente -->
+        <form id="formCadastro" style="display: none;" onsubmit="app.handleCadastro(event)">
+          <div class="auth-form-group">
+            <label for="cadNome">Nome Completo *</label>
+            <input type="text" id="cadNome" placeholder="Ex: Prof(a). Maria Silva" required>
+          </div>
+
+          <div class="auth-form-group">
+            <label for="cadEmail">E-mail Institucional (@ufjf.br) *</label>
+            <input type="email" id="cadEmail" placeholder="maria.silva@ufjf.br" required>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+            <div class="auth-form-group">
+              <label for="cadSiape">Matrícula SIAPE *</label>
+              <input type="text" id="cadSiape" placeholder="Ex: 2393476" required>
+            </div>
+            <div class="auth-form-group">
+              <label for="cadRegime">Regime de Trabalho *</label>
+              <select id="cadRegime" required>
+                <option value="40_DE">40h Dedicação Exclusiva</option>
+                <option value="40">40h Semanal</option>
+                <option value="20">20h Semanal</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="auth-form-group">
+            <label for="cadSenha">Crie uma Senha *</label>
+            <input type="password" id="cadSenha" placeholder="Mínimo 6 caracteres" minlength="6" required autocomplete="new-password">
+          </div>
+
+          <div class="auth-form-group">
+            <label for="cadSenhaConf">Confirme a Senha *</label>
+            <input type="password" id="cadSenhaConf" placeholder="Repita a senha" minlength="6" required autocomplete="new-password">
+          </div>
+
+          <div class="auth-alert auth-alert-warning" style="margin-bottom: 1rem; font-size: 0.8rem;">
+            <span>⏳</span>
+            <div>
+              <strong>Moderação obrigatória:</strong> Para sua segurança, seu cadastro precisará ser <strong>aprovado pela Secretaria do IAD</strong> antes que o login seja liberado.
+            </div>
+          </div>
+
+          <button type="submit" id="btnCadSubmit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">
+            Solicitar Cadastro
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       Modal de Moderação Administrativa (Aprovações)
+       ========================================== -->
+  <div id="adminModal" class="modal-backdrop">
+    <div class="modal-dialog modal-admin-dialog">
+      <div class="modal-header">
+        <div>
+          <h3 style="margin-bottom: 0.2rem;">⚙️ Painel de Moderação de Cadastros</h3>
+          <p>Secretaria IAD — Aprovação e liberação de acessos docentes</p>
+        </div>
+        <button type="button" class="btn-close-modal" onclick="app.fecharPainelAdmin()">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="admin-filter-bar">
+          <div class="admin-stats-pills">
+            <button type="button" class="admin-stat-pill active" onclick="app.filtrarAdminUsuarios('todos', this)">
+              Todos (<span id="countTodos">0</span>)
+            </button>
+            <button type="button" class="admin-stat-pill" onclick="app.filtrarAdminUsuarios('pendente', this)">
+              ⏳ Pendentes (<span id="countPendentes">0</span>)
+            </button>
+            <button type="button" class="admin-stat-pill" onclick="app.filtrarAdminUsuarios('aprovado', this)">
+              ✅ Aprovados (<span id="countAprovados">0</span>)
+            </button>
+            <button type="button" class="admin-stat-pill" onclick="app.filtrarAdminUsuarios('rejeitado', this)">
+              ❌ Rejeitados (<span id="countRejeitados">0</span>)
+            </button>
+          </div>
+          <button type="button" class="btn btn-secondary btn-sm" onclick="app.carregarUsuariosAdmin()" title="Atualizar lista">
+            🔄 Atualizar
+          </button>
+        </div>
+
+        <div class="table-admin-wrapper">
+          <table class="table-admin">
+            <thead>
+              <tr>
+                <th>Docente</th>
+                <th>SIAPE</th>
+                <th>E-mail</th>
+                <th>Regime</th>
+                <th>Status</th>
+                <th style="text-align: right;">Ações de Moderação</th>
+              </tr>
+            </thead>
+            <tbody id="tbodyAdminUsuarios">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 2rem;">
+                  Carregando cadastros...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" onclick="app.fecharPainelAdmin()">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==========================================
        Rodapé do Sistema
        ========================================== -->
   <footer class="system-footer">
@@ -418,6 +618,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/exceljs.min.js"></script>
   <script src="js/data.js"></script>
+  <script src="js/auth.js"></script>
   <script src="js/app.js"></script>
 </body>
 </html>
