@@ -339,40 +339,19 @@ const auth = {
   async aprovarUsuario(userId, usuarioCache = null) {
     if (supabaseClient) {
       try {
-        let usuario = usuarioCache;
-        if (!usuario || !usuario.nome) {
-          const { data, error: errBusca } = await supabaseClient
-            .from("pit_rit_usuarios")
-            .select("*")
-            .eq("id", userId)
-            .limit(1);
-          if (!errBusca && data && data.length > 0) {
-            usuario = data[0];
-          }
-        }
+        const { error } = await supabaseClient
+          .from("pit_rit_usuarios")
+          .update({ status: "aprovado", updated_at: new Date().toISOString() })
+          .eq("id", userId);
 
-        if (usuario) {
-          const usuarioAtualizado = {
-            ...usuario,
-            status: "aprovado",
-            updated_at: new Date().toISOString()
-          };
-
-          // Usa upsert com onConflict para evitar requisições PATCH
-          // (que disparam preflight OPTIONS e erro de CORS ao abrir localmente como file://)
-          const { error } = await supabaseClient
-            .from("pit_rit_usuarios")
-            .upsert(usuarioAtualizado, { onConflict: "id" });
-
-          if (!error) return { success: true };
-          console.warn("Erro no upsert de aprovação:", error);
-        }
+        if (!error) return { success: true };
+        console.warn("Erro ao aprovar no Supabase:", error);
       } catch (e) {
         console.warn("Erro ao aprovar no Supabase:", e);
       }
     }
 
-    // Atualiza localmente se for o caso
+    // Fallback: atualiza localmente
     const locais = this._obterUsuariosLocais();
     const idx = locais.findIndex(u => u.id === userId);
     if (idx !== -1) {
@@ -391,37 +370,19 @@ const auth = {
   async rejeitarUsuario(userId, usuarioCache = null) {
     if (supabaseClient) {
       try {
-        let usuario = usuarioCache;
-        if (!usuario || !usuario.nome) {
-          const { data, error: errBusca } = await supabaseClient
-            .from("pit_rit_usuarios")
-            .select("*")
-            .eq("id", userId)
-            .limit(1);
-          if (!errBusca && data && data.length > 0) {
-            usuario = data[0];
-          }
-        }
+        const { error } = await supabaseClient
+          .from("pit_rit_usuarios")
+          .update({ status: "rejeitado", updated_at: new Date().toISOString() })
+          .eq("id", userId);
 
-        if (usuario) {
-          const usuarioAtualizado = {
-            ...usuario,
-            status: "rejeitado",
-            updated_at: new Date().toISOString()
-          };
-
-          const { error } = await supabaseClient
-            .from("pit_rit_usuarios")
-            .upsert(usuarioAtualizado, { onConflict: "id" });
-
-          if (!error) return { success: true };
-          console.warn("Erro no upsert de rejeição:", error);
-        }
+        if (!error) return { success: true };
+        console.warn("Erro ao rejeitar no Supabase:", error);
       } catch (e) {
         console.warn("Erro ao rejeitar no Supabase:", e);
       }
     }
 
+    // Fallback: atualiza localmente
     const locais = this._obterUsuariosLocais();
     const idx = locais.findIndex(u => u.id === userId);
     if (idx !== -1) {
