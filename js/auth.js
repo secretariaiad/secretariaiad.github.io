@@ -340,9 +340,7 @@ const auth = {
     if (supabaseClient) {
       try {
         const { error } = await supabaseClient
-          .from("pit_rit_usuarios")
-          .update({ status: "aprovado", updated_at: new Date().toISOString() })
-          .eq("id", userId);
+          .rpc("aprovar_usuario", { user_id: userId });
 
         if (!error) return { success: true };
         console.warn("Erro ao aprovar no Supabase:", error);
@@ -371,9 +369,7 @@ const auth = {
     if (supabaseClient) {
       try {
         const { error } = await supabaseClient
-          .from("pit_rit_usuarios")
-          .update({ status: "rejeitado", updated_at: new Date().toISOString() })
-          .eq("id", userId);
+          .rpc("rejeitar_usuario", { user_id: userId });
 
         if (!error) return { success: true };
         console.warn("Erro ao rejeitar no Supabase:", error);
